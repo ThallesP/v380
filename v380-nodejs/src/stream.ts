@@ -94,7 +94,7 @@ export async function handleStream(packet: Buffer, sock: Socket) {
 	const streamData = await streamChunk(sock, streamPacket.len);
 
 	switch (streamPacket.type) {
-		case 0x00: // Probably I-frame
+		case 0x33: // Probably I-frame
 			videoPacketQueue.push(streamData);
 			if (streamPacket.curFrame === streamPacket.totalFrame - 1) {
 				// console.log('i frame');
@@ -107,7 +107,7 @@ export async function handleStream(packet: Buffer, sock: Socket) {
 				videoPacketQueue = [];
 			}
 			break;
-		case 0x01: // Probably P-frame
+		case 0x32: // Probably P-frame
 			// Video
 			videoPacketQueue.push(streamData);
 			if (streamPacket.curFrame === streamPacket.totalFrame - 1) {
