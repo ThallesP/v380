@@ -30,7 +30,7 @@ const app = express();
 // Workaround, need to rewrite to start stream when first client connected
 const TOTAL_PFRAME: number = 20;
 let pFrame: Buffer[] = [];
-let iFrame: Buffer;
+let iFrame: Buffer | undefined;
 
 export function init(listenPort: number, packet: any) {
 	width = packet.width;
@@ -75,13 +75,6 @@ function createStream(collections: IStreamInfo[]) {
 	return info;
 }
 
-function removeStream(strm: IStreamInfo) {
-	const i = strm._coll.findIndex((v: any) => v._id === strm.id);
-	if (i >= 0) {
-		strm._coll.splice(i, 1);
-	}
-}
-
 let videoPacketQueue: Buffer[] = [];
 let audioPacketQueue: Buffer[] = [];
 export async function handleStream(packet: Buffer, sock: Socket) {
@@ -94,7 +87,7 @@ export async function handleStream(packet: Buffer, sock: Socket) {
 	const streamData = await streamChunk(sock, streamPacket.len);
 
 	switch (streamPacket.type) {
-		case 0x33: // Probably I-frame
+		case 0x32: // Probably I-frame
 			videoPacketQueue.push(streamData);
 			if (streamPacket.curFrame === streamPacket.totalFrame - 1) {
 				// console.log('i frame');
@@ -107,7 +100,7 @@ export async function handleStream(packet: Buffer, sock: Socket) {
 				videoPacketQueue = [];
 			}
 			break;
-		case 0x32: // Probably P-frame
+		case 0x33: // Probably P-frame
 			// Video
 			videoPacketQueue.push(streamData);
 			if (streamPacket.curFrame === streamPacket.totalFrame - 1) {
@@ -144,7 +137,7 @@ export async function handleStream(packet: Buffer, sock: Socket) {
 	}
 }
 
-app.get('/audio/:filename', (req, res) => {
+/*app.get('/audio/:filename', (req, res) => {
 	const newStream = createStream(audStreams);
 
 	res.contentType('flv');
@@ -169,9 +162,43 @@ app.get('/audio/:filename', (req, res) => {
 		.pipe(res, { end: true });
 
 	console.log(f._getArguments());
-});
+});*/
 
-app.get('/video/:filename', (req, res) => {
+(async () => {
+    const videoStream = createStream(vidStreams);
+	if (iFrame) {
+		videoStream.stream.write(iFrame);
+		for (const frame of pFrame) {
+			videoStream.stream.write(frame);
+		}
+	}
+
+	videoStream.hasIframe = true;
+	console.log("creating ffmpeg")
+	const f = ffmpeg()
+	// input
+	.input(videoStream.stream)
+	.withInputOption(['-vcodec h264', '-probesize 32', '-formatprobesize 0', '-avioflags direct', '-flags low_delay'])
+	.withInputFPS(fps)
+	// output
+	.withOutputOption(['-f rtsp', '-rtsp_transport tcp'])
+	.videoCodec('libx264')
+	.videoCodec('copy')
+	.fps(fps)
+	.output("rtsp://0.0.0.0:8554/webCamStream")
+	.noAudio()
+
+	f
+	.on('end', () => {
+		console.log(`Stream ${videoStream.id} stopped`);
+	})
+	.on('error', (err) => {
+		console.log(err.message);
+		console.log(`Stream ${videoStream.id} stopped with error`);
+	})
+})();
+ 
+/*app.get('/video/:filename', (req, res) => {
 	const newStream = createStream(vidStreams);
 	if (iFrame) {
 		newStream.stream.write(iFrame);
@@ -185,19 +212,19 @@ app.get('/video/:filename', (req, res) => {
 	const f = ffmpeg()
 		// input
 		.input(newStream.stream)
-		.withInputOption(['-vcodec h264', '-probesize 32', '-formatprobesize 0', '-avioflags direct', '-flags low_delay'])
+		.withInputOption(['-vcodec h264', '-probesize 32', '-formatprobesize 0', '-avioflags direct', '-flags low_delay', '-fflags nobuffer', '-framedrop'])
 		.withInputFPS(fps)
-		.input(`http://localhost:${serverPort}/audio/stream.flv`)
+		//.input(`http://localhost:${serverPort}/audio/stream.flv`)
 		// output
 		.format('flv')
 		.flvmeta()
 		// .size(`${width}x${height}`)
 		// .videoBitrate('512k')
-		// .videoCodec('libx264')
+		.videoCodec('libx264')
 		.videoCodec('copy')
 		.fps(fps)
-		// .noAudio()
-		.audioCodec('copy');
+		.noAudio()
+		//.audioCodec('copy');
 
 	f
 		.on('end', () => {
@@ -209,8 +236,8 @@ app.get('/video/:filename', (req, res) => {
 			removeStream(newStream);
 			console.log(`Stream ${newStream.id} stopped with error`);
 		})
-		.pipe(res, { end: true });
+		.pipe(res);
 
-	console.log(`Stream ${newStream.id} started`);
-	console.log(f._getArguments());
-});
+		console.log(`Stream ${newStream.id} started`);
+		console.log(f._getArguments());
+});*/
